@@ -1,9 +1,7 @@
 # kube-maintainer
 kube maintainer
 
-![Coverage](../.github/badges/kube-maintainer/coverage-badge.svg)
-
-[![Build and Push Docker Image to Docker Hub or ECR](https://github.com/Rahu2000/kube-swiss-knife/actions/workflows/build-kube-maintainer.yaml/badge.svg)](https://github.com/Rahu2000/kube-swiss-knife/actions/workflows/build-kube-maintainer.yaml)
+![Coverage](../.github/badges/kube-maintainer/coverage-badge.svg) [![Build and Push Docker Image to Docker Hub or ECR](https://github.com/Rahu2000/kube-swiss-knife/actions/workflows/build-kube-maintainer.yaml/badge.svg)](https://github.com/Rahu2000/kube-swiss-knife/actions/workflows/build-kube-maintainer.yaml)
 
 ## 프로젝트 설정
 

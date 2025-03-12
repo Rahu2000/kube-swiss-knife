@@ -120,6 +120,7 @@ jobs:
           else
             echo "No version found in package.json, starting with 0.1.0"
             echo "new_release_version=0.1.0" >> $GITHUB_OUTPUT
+          fi
 
   build-and-push:
     runs-on: ubuntu-latest
