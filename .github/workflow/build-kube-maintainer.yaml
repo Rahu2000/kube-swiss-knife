@@ -1,0 +1,179 @@
+name: Build and Push Docker Image to Docker Hub or ECR
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  paths:
+    - "kube-maintainer/**"
+
+permissions:
+  contents: write # to be able to publish a GitHub release
+  issues: write # to be able to comment on released issues
+  pull-requests: write # to be able to comment on released pull requests
+  id-token: write # to enable use of OIDC for npm provenance
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          cd kube-maintainer
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+          pip install coverage
+          pip install coverage-badge
+
+      - name: Run tests and measure coverage
+        run: |
+          cd kube-maintainer
+          source venv/bin/activate
+          coverage run -m unittest discover -s tests
+          coverage report
+          coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Check coverage and generate badge
+        run: |
+          cd kube-maintainer
+          source venv/bin/activate
+          coverage report --fail-under=80
+          mkdir -p .github/badges/kube-maintainer
+          coverage_badge -o .github/badges/kube-maintainer/coverage-badge.svg -f || coverage-badge -o .github/badges/kube-maintainer/coverage-badge.svg -f
+
+      - name: Update README with coverage badge
+        run: |
+          cd kube-maintainer
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/kube-maintainer/coverage-badge.svg
+          git commit -m "Update coverage badge"
+          git push
+
+  release:
+    permissions:
+      contents: write # to be able to publish a GitHub release
+      issues: write # to be able to comment on released issues
+      pull-requests: write # to be able to comment on released pull requests
+      id-token: write # to enable use of OIDC for npm provenance
+
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    outputs:
+      new_release_version: ${{ steps.set-version.outputs.new_release_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # 전체 git 히스토리 가져오기 (semantic-release에 필요)
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: |
+          cd kube-maintainer
+          npm install
+
+      - name: Run semantic-release
+        id: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd kube-maintainer
+          npx semantic-release
+
+      - name: Set version output
+        id: set-version
+        run: |
+          # kube-maintainer 디렉토리의 package.json에서 버전 가져오기
+          VERSION=$(node -p "try { require('./kube-maintainer/package.json').version } catch(e) { '' }")
+          echo "package.json version: $VERSION"
+
+          if [ -n "$VERSION" ]; then
+            echo "new_release_version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "No version found in package.json, starting with 0.1.0"
+            echo "new_release_version=0.1.0" >> $GITHUB_OUTPUT
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: release
+
+    env:
+      IMAGE_HUB: ${{ vars.IMAGE_HUB }}
+      SEMVER_VERSION: ${{ needs.release.outputs.new_release_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log SEMVER_VERSION
+        run: echo "SEMVER_VERSION=${{ env.SEMVER_VERSION }}"
+
+      - name: Log in to Docker Hub
+        if: env.IMAGE_HUB == 'docker'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Log in to Amazon ECR
+        if: env.IMAGE_HUB == 'ecr'
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build and push Docker image
+        run: |
+          docker buildx create --use --name maintainer_builder
+          if [ "${IMAGE_HUB}" == "docker" ]; then
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f kube-maintainer/Dockerfile \
+              -t ${{ vars.DOCKER_USERNAME }}/kube-maintainer:${SEMVER_VERSION} \
+              -t ${{ vars.DOCKER_USERNAME }}/kube-maintainer:latest \
+              --push kube-maintainer
+          elif [ "${IMAGE_HUB}" == "ecr" ]; then
+            aws_account_id=$(aws sts get-caller-identity --query Account --output text)
+            region=$(aws configure get region)
+            ecr_repo="${aws_account_id}.dkr.ecr.${region}.amazonaws.com/kube-maintainer"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f kube-maintainer/Dockerfile \
+              -t ${ecr_repo}:${SEMVER_VERSION} \
+              -t ${ecr_repo}:latest \
+              --push kube-maintainer
+          fi
+          docker buildx rm maintainer_builder
+
+      - name: Log out from Docker Hub
+        if: env.IMAGE_HUB == 'docker'
+        run: docker logout

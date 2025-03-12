@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-maintainer
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-maintainer
+  template:
+    metadata:
+      labels:
+        app: kube-maintainer
+    spec:
+      serviceAccountName: kube-maintainer-sa
+      containers:
+        - name: kube-maintainer
+          image: rahu2000/kube-maintainer:0.1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: kube-maintainer-target-namespace-config
+                  key: namespace
+            - name: AUTO_DELETE
+              value: "true" # 자동 삭제 여부
+            - name: SLEEP_TIME
+              value: "180" # 주기
+          volumeMounts:
+            - name: system-maintenance-config
+              mountPath: /config/system-maintenance
+          resources:
+            limits:
+              cpu: 200m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: system-maintenance-config
+          configMap:
+            name: kube-maintainer-system-maintenance-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-maintainer-sa
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: kube-maintainer-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["networking.istio.io"]
+    resources: ["envoyfilters"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kube-maintainer-rolebinding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: kube-maintainer-sa
+    namespace: kube-system
+roleRef:
+  kind: Role
+  name: kube-maintainer-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-maintainer-service
+  namespace: kube-system
+spec:
+  selector:
+    app: kube-maintainer
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-maintainer-target-namespace-config
+  namespace: kube-system
+data:
+  namespace: default
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-maintainer-system-maintenance-config
+  namespace: kube-system
+data: {}
