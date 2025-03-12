@@ -6,15 +6,11 @@ on:
       - main
     paths:
       - "disk-sweeper/**"
-    paths-ignore:
-      - "disk-sweeper/README.md"
   pull_request:
     branches:
       - main
     paths:
       - "disk-sweeper/**"
-    paths-ignore:
-      - "disk-sweeper/README.md"
 
 permissions:
   contents: write # to be able to publish a GitHub release
