@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: disk-sweeper
+spec:
+  schedule: "0 18 16 * *" # run every 16th per month at 18:00
+  successfulJobsHistoryLimit: 1 # successful job history limit
+  failedJobsHistoryLimit: 1 # failed job history limit
+  jobTemplate:
+    spec:
+      completions: 1 # number of successful completions required
+      parallelism: 1 # maximum number of parallel jobs
+      template:
+        metadata:
+          labels:
+            app: disk-sweeper
+        spec:
+          containers:
+            - name: sweeper
+              image: rahu2000/disk-sweeper:0.1.0
+              imagePullPolicy: Always
+              volumeMounts: # need to mount the docker socket
+                - name: nerdctl-dir
+                  mountPath: /usr/local/bin
+                - name: crictl
+                  mountPath: /usr/bin/crictl
+                - name: ctr
+                  mountPath: /usr/bin/ctr
+                - name: docker-socket
+                  mountPath: /var/run/containerd/containerd.sock
+              securityContext:
+                runAsUser: 0
+                runAsGroup: 0
+                privileged: true
+          restartPolicy: OnFailure
+          volumes: # hostPath volumes about docker socket and binaries
+            - name: nerdctl-dir
+              hostPath:
+                path: /usr/local/bin
+                type: Directory
+            - name: crictl
+              hostPath:
+                path: /usr/bin/crictl
+                type: FileOrCreate
+            - name: ctr
+              hostPath:
+                path: /usr/bin/ctr
+                type: FileOrCreate
+            - name: docker-socket
+              hostPath:
+                path: /var/run/containerd/containerd.sock
+                type: Socket
+          tolerations: # tolerations for node taints
+            - key: "node.kubernetes.io/not-ready"
+              operator: "Exists"
+              effect: "NoSchedule"
+            - key: "node.kubernetes.io/unreachable"
+              operator: "Exists"
+              effect: "NoSchedule"
+            - effect: NoSchedule
+              key: node.kubernetes.io/network-unavailable
+              operator: Exists
+            - operator: "Exists"
+              effect: "NoSchedule"
+            - operator: "Exists"
+              effect: "NoExecute"
+          topologySpreadConstraints: # need to spread the pods across the nodes
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  app: disk-sweeper

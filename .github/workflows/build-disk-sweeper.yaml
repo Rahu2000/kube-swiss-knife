@@ -1,0 +1,107 @@
+name: Build and Push Docker Image to Docker Hub
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "disk-sweeper/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "disk-sweeper/**"
+
+permissions:
+  contents: write # to be able to publish a GitHub release
+  issues: write # to be able to comment on released issues
+  pull-requests: write # to be able to comment on released pull requests
+  id-token: write # to enable use of OIDC for npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    outputs:
+      new_release_version: ${{ steps.set-version.outputs.new_release_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # 전체 git 히스토리 가져오기 (semantic-release에 필요)
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: |
+          cd disk-sweeper
+          npm install
+
+      - name: Run semantic-release
+        id: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd disk-sweeper
+          npx semantic-release
+
+      - name: Set version output
+        id: set-version
+        run: |
+          # disk-sweeper 디렉토리의 package.json에서 버전 가져오기
+          VERSION=$(node -p "try { require('./disk-sweeper/package.json').version } catch(e) { '' }")
+          echo "package.json version: $VERSION"
+
+          if [ -n "$VERSION" ]; then
+            echo "new_release_version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "No version found in package.json, starting with 0.1.0"
+            echo "new_release_version=0.1.0" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: release
+
+    env:
+      SEMVER_VERSION: ${{ needs.release.outputs.new_release_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log SEMVER_VERSION
+        run: echo "SEMVER_VERSION=${{ env.SEMVER_VERSION }}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        run: |
+          docker buildx create --use --name multiarch-builder --driver docker-container
+          docker buildx inspect --bootstrap
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -f disk-sweeper/Dockerfile \
+            -t ${{ vars.DOCKER_USERNAME }}/disk-sweeper:${SEMVER_VERSION} \
+            -t ${{ vars.DOCKER_USERNAME }}/disk-sweeper:latest \
+            --push disk-sweeper
+          docker buildx rm multiarch-builder
+
+      - name: Log out from Docker Hub
+        run: docker logout
