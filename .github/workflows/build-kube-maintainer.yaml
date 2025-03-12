@@ -55,7 +55,6 @@ jobs:
 
       - name: Check coverage and generate badge
         run: |
-          cd kube-maintainer
           source venv/bin/activate
           coverage report --fail-under=80
           mkdir -p .github/badges/kube-maintainer
@@ -63,7 +62,6 @@ jobs:
 
       - name: Update README with coverage badge
         run: |
-          cd kube-maintainer
           if [ -f .github/badges/kube-maintainer/coverage-badge.svg ]; then
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
