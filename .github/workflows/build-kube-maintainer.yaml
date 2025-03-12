@@ -68,8 +68,13 @@ jobs:
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
             git add .github/badges/kube-maintainer/coverage-badge.svg
-            git commit -m "Update coverage badge"
-            git push
+            # 변경사항이 있는지 확인 후 커밋 진행
+            if git diff --staged --quiet; then
+              echo "No changes to commit - badge is unchanged"
+            else
+              git commit -m "Update coverage badge"
+              git push
+            fi
           else
             echo "Coverage badge not found, skipping git add and commit."
           fi
