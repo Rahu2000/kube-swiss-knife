@@ -55,10 +55,11 @@ jobs:
 
       - name: Check coverage and generate badge
         run: |
+          cd kube-maintainer
           source venv/bin/activate
           coverage report --fail-under=80
-          mkdir -p .github/badges/kube-maintainer
-          coverage_badge -o .github/badges/kube-maintainer/coverage-badge.svg -f || coverage-badge -o .github/badges/kube-maintainer/coverage-badge.svg -f
+          mkdir -p ../.github/badges/kube-maintainer
+          coverage_badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f || coverage-badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f
 
       - name: Update README with coverage badge
         run: |
