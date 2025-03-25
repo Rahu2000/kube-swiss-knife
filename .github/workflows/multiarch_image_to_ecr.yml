@@ -1,0 +1,61 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    paths:
+      - "/multiarch-image-to-ecr/asserts/images.txt"
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest # GitHub 관리형 환경으로 변경
+
+    steps:
+      # 1. GitHub 레포지토리 체크아웃
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. AWS CLI 로그인
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # 3. Validate images.txt format
+      - name: Validate images.txt format
+        run: |
+          if ! grep -E '^[^,]+,[^,]+$' asserts/images.txt; then
+            echo "Error: Invalid format in images.txt"
+            exit 1
+          fi
+
+      # 4. 파일 읽기 및 루프 처리
+      - name: Read images.txt and process images
+        env:
+          ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+          ACCOUNTS: ${{ secrets.ECR_ACCOUNTS }}
+        run: |
+          INPUT_FILE="asserts/images.txt"
+          > failed_jobs.log  # 실패한 작업 기록 초기화
+          while IFS= read -r line || [ -n "$line" ]; do
+            PUBLIC_REPO=$(echo "$line" | cut -d ',' -f 1)
+            TAG=$(echo "$line" | cut -d ',' -f 2)
+            if [[ -z "$PUBLIC_REPO" || -z "$TAG" ]]; then
+              echo "Error: Invalid line format in images.txt: $line"
+              continue
+            fi
+            echo "Processing: $PUBLIC_REPO, $TAG, $ECR_REGISTRY, $ACCOUNTS"
+            chmod +x ./multiarch-image-to-ecr/multiarch_image_to_ecr.sh
+            ./multiarch-image-to-ecr/multiarch_image_to_ecr.sh "$PUBLIC_REPO" "$TAG" "$ECR_REGISTRY" "$ACCOUNTS" || echo "$PUBLIC_REPO:$TAG" >> failed_jobs.log
+          done < "$INPUT_FILE"
+
+      # 5. 실패한 작업 출력
+      - name: Print failed jobs
+        if: always() # 항상 실행
+        run: |
+          if [ -s failed_jobs.log ]; then
+            echo "The following jobs failed:"
+            cat failed_jobs.log
+            exit 1
+          else
+            echo "All jobs completed successfully."
+          fi
