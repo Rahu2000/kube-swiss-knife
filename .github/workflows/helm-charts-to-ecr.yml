@@ -1,0 +1,70 @@
+name: Build and Push Helm Charts to ECR
+
+on:
+  push:
+    paths:
+      - "helm-charts-to-ecr/asserts/charts.txt"
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. GitHub 레포지토리 체크아웃
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. AWS CLI 로그인
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+
+      # 3. Helm 레지스트리 인증
+      - name: Authenticate Helm with Amazon ECR
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | helm registry login --username AWS --password-stdin "${{ vars.ECR_REGISTRY }}"
+
+      # 4. Validate charts.txt format
+      - name: Validate charts.txt format
+        run: |
+          if ! grep -E '^[^,]+,[^,]+,[^,]+$' helm-charts-to-ecr/asserts/charts.txt; then
+            echo "Error: Invalid format in charts.txt. Expected format: <helm_repo>,<chart_path>,<chart_version>"
+            exit 1
+          fi
+
+      # 5. 파일 읽기 및 Helm Chart 처리
+      - name: Read charts.txt and process Helm charts
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+          ALLOWED_ACCOUNTS: ${{ secrets.ALLOWED_ACCOUNTS }} # 선택적 변수
+        run: |
+          INPUT_FILE="helm-charts-to-ecr/asserts/charts.txt"
+          > failed_jobs.log  # 실패한 작업 기록 초기화
+          while IFS= read -r line || [ -n "$line" ]; do
+            HELM_REPO=$(echo "$line" | cut -d ',' -f 1)
+            CHART_PATH=$(echo "$line" | cut -d ',' -f 2)
+            CHART_VERSION=$(echo "$line" | cut -d ',' -f 3)
+            if [[ -z "$HELM_REPO" || -z "$CHART_PATH" || -z "$CHART_VERSION" ]]; then
+              echo "Error: Invalid line format in charts.txt: $line"
+              continue
+            fi
+            echo "Processing: $HELM_REPO, $CHART_PATH, $CHART_VERSION, $ECR_REGISTRY"
+            chmod +x helm-charts-to-ecr/helm_chart_to_ecr.sh
+            ./helm-charts-to-ecr/helm_chart_to_ecr.sh "$HELM_REPO" "$CHART_PATH" "$CHART_VERSION" "$AWS_REGION" "$ECR_REGISTRY" "${ALLOWED_ACCOUNTS:-}" || echo "$HELM_REPO,$CHART_PATH,$CHART_VERSION" >> failed_jobs.log
+          done < "$INPUT_FILE"
+
+      # 6. 실패한 작업 출력
+      - name: Print failed jobs
+        if: always() # 항상 실행
+        run: |
+          if [ -s failed_jobs.log ]; then
+            echo "The following jobs failed:"
+            cat failed_jobs.log
+            exit 1
+          else
+            echo "All jobs completed successfully."
+          fi
