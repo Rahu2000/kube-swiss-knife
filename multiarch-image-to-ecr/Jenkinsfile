@@ -1,0 +1,98 @@
+pipeline {
+    agent any
+
+    environment {
+        ECR_REGISTRY = credentials('ecr-registry') // Jenkins에 저장된 ECR 레지스트리 URL
+        ACCOUNTS = credentials('ecr-accounts')    // Jenkins에 저장된 ECR 계정 정보
+    }
+
+    triggers {
+        // Webhook 기반 트리거
+        pollSCM('H/5 * * * *') // 5분마다 Git 변경 사항 확인
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                echo 'Checking out code...'
+                checkout scm
+            }
+        }
+
+        stage('Validate Changed Files') {
+            steps {
+                script {
+                    // 변경된 파일 목록 확인
+                    def changedFiles = sh(
+                        script: "git diff-tree --no-commit-id --name-only -r $GIT_COMMIT",
+                        returnStdout: true
+                    ).trim().split("\n")
+
+                    // 특정 파일이 변경되었는지 확인
+                    if (!changedFiles.contains("multiarch-image-to-ecr/asserts/images.txt")) {
+                        echo "No changes in images.txt. Skipping pipeline."
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                }
+            }
+        }
+
+        stage('Validate images.txt Format') {
+            steps {
+                echo 'Validating images.txt format...'
+                sh '''
+                if ! grep -E '^[^,]+,[^,]+$' multiarch-image-to-ecr/asserts/images.txt; then
+                    echo "Error: Invalid format in images.txt"
+                    exit 1
+                fi
+                '''
+            }
+        }
+
+        stage('Process Images') {
+            steps {
+                echo 'Processing images...'
+                sh '''
+                INPUT_FILE="multiarch-image-to-ecr/asserts/images.txt"
+                > failed_jobs.log  # Initialize failed jobs log
+                while IFS= read -r line || [ -n "$line" ]; do
+                    PUBLIC_REPO=$(echo "$line" | cut -d ',' -f 1)
+                    TAG=$(echo "$line" | cut -d ',' -f 2)
+                    if [[ -z "$PUBLIC_REPO" || -z "$TAG" ]]; then
+                        echo "Error: Invalid line format in images.txt: $line"
+                        continue
+                    fi
+                    echo "Processing: $PUBLIC_REPO, $TAG, $ECR_REGISTRY, $ACCOUNTS"
+                    chmod +x ./multiarch-image-to-ecr/multiarch_image_to_ecr.sh
+                    ./multiarch-image-to-ecr/multiarch_image_to_ecr.sh "$PUBLIC_REPO" "$TAG" "$ECR_REGISTRY" "$ACCOUNTS" || echo "$PUBLIC_REPO:$TAG" >> failed_jobs.log
+                done < "$INPUT_FILE"
+                '''
+            }
+        }
+
+        stage('Print Failed Jobs') {
+            steps {
+                echo 'Checking for failed jobs...'
+                sh '''
+                if [ -s failed_jobs.log ]; then
+                    echo "The following jobs failed:"
+                    cat failed_jobs.log
+                    exit 1
+                else
+                    echo "All jobs completed successfully."
+                fi
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline execution completed.'
+        }
+        failure {
+            echo 'Pipeline failed. Check the logs for details.'
+        }
+    }
+}
