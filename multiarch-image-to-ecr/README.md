@@ -19,4 +19,4 @@ aws ecr get-login-password --region <REGION> | docker login --username AWS --pas
 
 2. Image Migration Pipeline
 
-[Refer to the GitHub Action workflows](./../.github/workflows/multiarch_image_to_ecr.yml)
+[Refer to the GitHub Action workflows](./../github/workflows/multiarch-image-to-ecr.yml)
