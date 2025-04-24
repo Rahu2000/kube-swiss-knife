@@ -35,7 +35,7 @@ jobs:
           ACCOUNTS: ${{ secrets.ECR_ACCOUNTS }}
         run: |
           INPUT_FILE="asserts/images.txt"
-          > failed_jobs.log  # 실패한 작업 기록 초기화
+          : > failed_jobs.log  # 실패한 작업 기록 초기화
           while IFS= read -r line || [ -n "$line" ]; do
             PUBLIC_REPO=$(echo "$line" | cut -d ',' -f 1)
             TAG=$(echo "$line" | cut -d ',' -f 2)

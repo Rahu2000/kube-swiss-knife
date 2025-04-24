@@ -17,6 +17,6 @@ aws ecr get-login-password --region <REGION> | docker login --username AWS --pas
 ./multiarch_image_to_ecr.sh bitnami/nginx 1.27.4 111111111111.dkr.ecr.ap-northeast-2.amazonaws.com "222222222222,333333333333,444444444444"
 ```
 
-2. Image Migration Pipeline
+1. Image Migration Pipeline
 
 [Refer to the GitHub Action workflows](./../.github/workflows/multiarch-image-to-ecr.yml)
