@@ -1,4 +1,8 @@
-FROM --platform=$TARGETPLATFORM alpine:latest
+FROM alpine:latest
+
+# NAMESPACE 입력값을 빌드 시 전달
+ARG NAMESPACE
+ENV NAMESPACE=${NAMESPACE}
 
 # Install necessary packages, create user, copy script, make it executable, and change ownership in a single RUN command
 RUN apk add --no-cache bash jq && \
@@ -17,4 +21,4 @@ RUN chmod +x /home/sweeper/sweeper.sh && \
 USER sweeper
 
 # Set the entrypoint to the sweeper script
-ENTRYPOINT ["/bin/bash", "/home/sweeper/sweeper.sh"]
+ENTRYPOINT ["/bin/sh", "-c", "/home/sweeper/sweeper.sh \"$NAMESPACE\""]
