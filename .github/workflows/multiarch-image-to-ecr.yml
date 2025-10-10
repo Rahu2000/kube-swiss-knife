@@ -11,41 +11,56 @@ jobs:
     runs-on: ubuntu-latest # GitHub 관리형 환경으로 변경
 
     steps:
+      # 0. ENV 설정
+      - name: Set up ENV
+        run: |
+          echo "ASSERTS_FILE=asserts/images.txt" >> $GITHUB_ENV
+
       # 1. GitHub 레포지토리 체크아웃
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # 2. AWS CLI 로그인
+      # 2.0. AWS Assume Role 설정
+      - name: Assume Role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ap-northeast-2
+          # role-to-assume: ${{ vars.ECR_ASSUME_ROLE }} # Cross Account 접근이 필요 할 경우
+          # role-skip-session-tagging: true             # Cross Account 접근이 필요 할 경우
+
+      # 2.1. AWS CLI 로그인
       - name: Log in to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
-      # 3. Validate images.txt format
-      - name: Validate images.txt format
+      # 3. Validate format
+      - name: Validate images list format
         run: |
-          if ! grep -E '^[^,]+,[^,]+$' asserts/images.txt; then
-            echo "Error: Invalid format in images.txt"
+          if ! grep -E '^[^,]+,[^,]+$' $ASSERTS_FILE; then
+            echo "Error: Invalid format in images list"
             exit 1
           fi
 
       # 4. 파일 읽기 및 루프 처리
-      - name: Read images.txt and process images
+      - name: Read images list and process images
         env:
           ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
-          ACCOUNTS: ${{ secrets.ECR_ACCOUNTS }}
+          PUSH_ACCOUNTS: ${{ vars.ECR_PUSH_ACCOUNTS }}
+          PULL_ACCOUNTS: ${{ vars.ECR_PULL_ACCOUNTS }}
         run: |
-          INPUT_FILE="asserts/images.txt"
+          INPUT_FILE="$ASSERTS_FILE"
           : > failed_jobs.log  # 실패한 작업 기록 초기화
           while IFS= read -r line || [ -n "$line" ]; do
             PUBLIC_REPO=$(echo "$line" | cut -d ',' -f 1)
             TAG=$(echo "$line" | cut -d ',' -f 2)
+            ALTERNATE_REPO=$(echo "$line" | cut -d ',' -f 3)
             if [[ -z "$PUBLIC_REPO" || -z "$TAG" ]]; then
-              echo "Error: Invalid line format in images.txt: $line"
+              echo "Error: Invalid line format in $ASSERTS_FILE: $line"
               continue
             fi
-            echo "Processing: $PUBLIC_REPO, $TAG, $ECR_REGISTRY, $ACCOUNTS"
-            chmod +x ./multiarch-image-to-ecr/multiarch_image_to_ecr.sh
-            ./multiarch-image-to-ecr/multiarch_image_to_ecr.sh "$PUBLIC_REPO" "$TAG" "$ECR_REGISTRY" "$ACCOUNTS" || echo "$PUBLIC_REPO:$TAG" >> failed_jobs.log
+            echo "Processing: $PUBLIC_REPO, $TAG, $ECR_REGISTRY, $PUSH_ACCOUNTS, $PULL_ACCOUNTS"
+            chmod +x multiarch_image_to_ecr.sh
+            ./multiarch_image_to_ecr.sh "$PUBLIC_REPO" "$TAG" "$ECR_REGISTRY" "$PUSH_ACCOUNTS" "$PULL_ACCOUNTS" "$ALTERNATE_REPO" || echo "$PUBLIC_REPO:$TAG" >> failed_jobs.log
           done < "$INPUT_FILE"
 
       # 5. 실패한 작업 출력
@@ -59,3 +74,13 @@ jobs:
           else
             echo "All jobs completed successfully."
           fi
+
+      # 6. 정리 작업
+      - name: Cleanup
+        if: always() # 항상 실행
+        run: |
+          # cleanup local images
+          docker image prune -af
+
+          # cleanup failed jobs log
+          rm -f failed_jobs.log

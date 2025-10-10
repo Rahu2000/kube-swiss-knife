@@ -1,1 +1,1 @@
-bitnami/nginx,1.27.4
+bitnami/nginx,1.27.4,bitnamilegacy/nginx
