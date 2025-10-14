@@ -52,7 +52,14 @@ else
 fi
 
 cp ./bin/monitoring.svc.sh.template ./svc.sh || failed "failed to copy svc.sh"
-chown $(id -u):$(id -g) ./svc.sh || failed "failed to set owner for svc.sh"
+
+# sudo로 실행된 경우 원래 사용자의 UID/GID 사용
+if [ -n "$SUDO_UID" ] && [ -n "$SUDO_GID" ]; then
+    chown $SUDO_UID:$SUDO_GID ./svc.sh || failed "failed to set owner for svc.sh"
+else
+    chown $(id -u):$(id -g) ./svc.sh || failed "failed to set owner for svc.sh"
+fi
+
 chmod 755 ./svc.sh || failed "failed to set permission for svc.sh"
 
 # Run svc.sh to register the monitoring system as a systemd service

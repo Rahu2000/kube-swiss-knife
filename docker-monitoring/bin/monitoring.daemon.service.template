@@ -8,7 +8,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory={{RunnerRoot}}
 ExecStart={{Command}} up -d
-ExecStop={{Command}} down
+ExecStop={{Command}} stop
 TimeoutStartSec=0
 
 [Install]

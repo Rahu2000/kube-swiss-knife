@@ -29,9 +29,10 @@ DOCKER_COMPOSE_CMD=""
 
 # Docker Compose 명령어 확인 (docker-compose 우선, 없으면 docker compose)
 if command -v docker-compose &> /dev/null; then
-    DOCKER_COMPOSE_CMD="docker-compose"
+    DOCKER_COMPOSE_CMD="$(which docker-compose)"
 elif docker --help | grep -q ' compose '; then
-    DOCKER_COMPOSE_CMD="docker compose"
+    DOCKER_PATH="$(which docker)"
+    DOCKER_COMPOSE_CMD="${DOCKER_PATH} compose"
 else
     echo "Docker Compose could not be found"
     exit 1
