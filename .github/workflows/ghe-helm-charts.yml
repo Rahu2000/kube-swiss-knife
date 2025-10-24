@@ -63,7 +63,12 @@ jobs:
               if helm pull "$repo_name/$chart_name" --version "$chart_version" --destination docs; then
                 echo "Successfully downloaded $chart_name-$chart_version"
 
-                downloaded_file=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${chart_version}*.tgz" | head -n1)
+                # chart_version의 첫 글자가 숫자가 아니면 해당 문자만 제외 (예: v1.2.3 → 1.2.3)
+                search_version="$chart_version"
+                if [[ ! $chart_version =~ ^[0-9] ]]; then
+                  search_version="${chart_version:1}"
+                fi
+                downloaded_file=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${search_version}*.tgz" | head -n1)
 
                 # 다운로드한 파일을 charts/ 디렉토리에 압축 해제
                 rm -rf "charts/${chart_name}"
