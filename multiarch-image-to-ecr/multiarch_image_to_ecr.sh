@@ -93,11 +93,11 @@ EOF
   "rules": [
     {
       "rulePriority": 1,
-      "description": "Retain only the most recent 15 images",
+      "description": "Retain only the most recent 30 images",
       "selection": {
         "tagStatus": "any",
         "countType": "imageCountMoreThan",
-        "countNumber": 15
+        "countNumber": 30
       },
       "action": {
         "type": "expire"
@@ -157,7 +157,7 @@ ECR_REPO_URI="${ECR_REGISTRY}/${REPOSITORY}:${TAG}"
 # ECR 리포지토리 존재 여부 확인
 REPO_CREATED=false
 if ensure_ecr_repository "$REPOSITORY"; then
-    REPO_CREATED=true
+  REPO_CREATED=true
 fi
 
 # ECR이 존재하지 않는 경우 신규 생성 후 ECR 권한 정책/이미지 생명주기 설정

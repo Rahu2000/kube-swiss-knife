@@ -1,0 +1,4 @@
+https://argoproj.github.io/argo-helm,argo-rollouts,2.34.1
+https://charts.jetstack.io,cert-manager,1.12.2
+https://kubernetes-sigs.github.io/descheduler,descheduler,0.32.0
+https://prometheus-community.github.io/helm-charts,kube-prometheus-stack,47.5.0

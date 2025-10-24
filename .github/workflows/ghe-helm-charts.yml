@@ -1,0 +1,173 @@
+name: Public Helm Charts Management
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "/ghe-helm-charts/asserts/helm-charts.txt"
+
+env:
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+jobs:
+  update-charts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: "v3.13.0"
+
+      - name: Clean and prepare directories
+        run: |
+          # charts 및 docs 디렉토리 생성
+          mkdir -p charts docs
+
+          # 기존 index.yaml 삭제 (재생성할 예정)
+          rm -f docs/index.yaml
+
+      - name: Read chart list and download
+        run: |
+          while IFS=',' read -r repo_url chart_name chart_version || [ -n "$repo_url" ]; do
+            # 빈 줄이나 주석 스킵
+            if [[ -z "$repo_url" ]] || [[ "$repo_url" =~ ^# ]]; then
+              continue
+            fi
+
+            # 공백 제거
+            repo_url=$(echo "$repo_url" | xargs)
+            chart_name=$(echo "$chart_name" | xargs)
+            chart_version=$(echo "$chart_version" | xargs)
+
+            echo "Processing: $chart_name version $chart_version from $repo_url"
+
+            # Helm repo 추가 repo_url에서 https:// 와 첫 . 까지 값에 temp- 붙임
+            repo_name="temp-$(echo $repo_url | sed 's|https://||;s|/.*||;s|:|--|g')"
+            if ! helm repo add "$repo_name" "$repo_url"; then
+              echo "Failed to add repository: $repo_url"
+              continue
+            fi
+
+            helm repo update "$repo_name"
+
+            # 중복 파일 방지를 위해 기존에 동일한 이름의 .tgz 파일이 있는지 확인
+            expected_tgz=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${chart_version}*.tgz" | head -n1)
+
+            # 차트가 이미 존재하지 않는 경우에만 다운로드
+            if [ ! -f "$expected_tgz" ]; then
+              echo "Downloading $chart_name version $chart_version..."
+              if helm pull "$repo_name/$chart_name" --version "$chart_version" --destination docs; then
+                echo "Successfully downloaded $chart_name-$chart_version"
+
+                downloaded_file=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${chart_version}*.tgz" | head -n1)
+
+                # 다운로드한 파일을 charts/ 디렉토리에 압축 해제
+                rm -rf "charts/${chart_name}"
+                tar -xzf "$downloaded_file" -C charts
+              else
+                echo "Failed to download $chart_name version $chart_version"
+              fi
+            else
+              echo "Chart $chart_name-$chart_version already exists, skipping download"
+            fi
+
+          done < ghe-helm-charts/asserts/helm-charts.txt
+
+      - name: Generate index.yaml
+        run: |
+          cd docs
+          # index.yaml 생성
+          helm repo index .
+          cd ..
+
+      - name: Generate index.html
+        run: |
+          cat > docs/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="ko">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>helm-charts Packages</title>
+            <style>
+              body { font-family: Arial, sans-serif; max-width: 1200px; margin: 50px auto; padding: 20px; }
+              h1 { color: #333; }
+              ul { list-style-type: none; padding: 0; }
+              li { padding: 8px; border-bottom: 1px solid #eee; }
+              code { background: #f4f4f4; padding: 10px; display: block; margin: 10px 0; border-radius: 4px; }
+              .command { background: #2d2d2d; color: #f8f8f8; }
+            </style>
+          </head>
+          <body>
+            <h1>🎯 ghe-helm-charts Packages</h1>
+            <h2>📦 Available Charts</h2>
+            <ul>
+          EOF
+
+          # .tgz 파일 목록 추가
+          for file in docs/*.tgz; do
+            if [ -f "$file" ]; then
+              fname=$(basename "$file")
+              echo "    <li><a href=\"./$fname\" target=\"_blank\">$fname</a></li>"
+            fi
+          done >> docs/index.html
+
+          cat >> docs/index.html <<'EOF'
+            </ul>
+
+            <h2>🚀 Usage</h2>
+            <h3>Helm Repository 등록</h3>
+            <code class="command">helm repo add ghe-charts https://YOUR-GITHUB/pages/Tech/ghe-helm-charts/ (--username GITHUB_USER --password GITHUB_TOKEN)</code>
+            <h4>--username 와 --password 옵션은 github pages 설정이 퍼블릭이 아닐 경우에만 필요합니다.</h4>
+
+            <h3>Repository 업데이트</h3>
+            <code class="command">helm repo update ghe-charts</code>
+
+            <h3>사용 가능한 차트 검색</h3>
+            <code class="command">helm search repo ghe-charts</code>
+
+            <h3>차트 설치</h3>
+            <code class="command">helm install my-release ghe-charts/[chart-name]</code>
+          </body>
+          </html>
+          EOF
+
+      # # 커밋 및 푸시 단계 (실제 구현에서는 주석 처리 해제해야 함)
+      # - name: set git config
+      #   run: |
+      #     git config --global user.name "devops"
+      #     git config --global user.email "devops@github.com"
+
+      # - name: Commit and push changes
+      #   run: |
+      #     # 변경사항이 있는지 확인
+      #     if [[ -n $(git status -s) ]]; then
+      #       git add charts docs
+      #       git commit -m "Update charts and packages automatically [skip ci]" || true
+      #       git push
+      #       echo "✓ Changes committed and pushed"
+      #     else
+      #       echo "ℹ No changes to commit"
+      #     fi
+
+      # - name: Notify on failure
+      #   if: failure() && (env.SLACK_WEBHOOK_URL != '')
+      #   run: |
+      #     echo "Mirror operation failed!"
+      #     echo "Event: ${{ github.event_name }}"
+      #     echo "Action: ${{ github.event.action }}"
+      #     echo "Ref: ${{ github.ref }}"
+      #     echo "Event Ref: ${{ github.event.ref }}"
+      #     echo "Ref Type: ${{ github.event.ref_type }}"
+      #     # 여기에 Slack, 이메일 또는 다른 알림 시스템을 추가할 수 있습니다.
+      #     # 예: curl -X POST -H 'Content-type: application/json' --data '{"text":"Mirror failed for ${{ github.repository }}"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: cleanup
+        if: always()
+        run: |
+          # remove temp helm repo
+          helm repo remove $(helm repo list | grep temp- | awk '{print $1}' ) || true

@@ -1,0 +1,18 @@
+# Helm 관련 파일 무시
+!packages/*.tgz
+charts/*/charts/
+charts/*/tmp/
+
+# Kubernetes 관련 파일 무시
+*.log
+*.out
+
+# 기타
+.DS_Store
+.env
+.idea/
+.vscode/
+__pycache__/
+
+# Git
+.git/
