@@ -18,9 +18,9 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Helm
-        uses: azure/setup-helm@v3
+        uses: azure/setup-helm@v4.3.1
         with:
-          version: "v3.13.0"
+          version: "v3.19.0"
 
       - name: Clean and prepare directories
         run: |
@@ -32,7 +32,7 @@ jobs:
 
       - name: Read chart list and download
         run: |
-          while IFS=',' read -r repo_url chart_name chart_version || [ -n "$repo_url" ]; do
+          while IFS=',' read -r repo_url chart_name chart_version repo_type || [ -n "$repo_url" ]; do
             # 빈 줄이나 주석 스킵
             if [[ -z "$repo_url" ]] || [[ "$repo_url" =~ ^# ]]; then
               continue
@@ -42,42 +42,65 @@ jobs:
             repo_url=$(echo "$repo_url" | xargs)
             chart_name=$(echo "$chart_name" | xargs)
             chart_version=$(echo "$chart_version" | xargs)
-
-            echo "Processing: $chart_name version $chart_version from $repo_url"
-
-            # Helm repo 추가 repo_url에서 https:// 와 첫 . 까지 값에 temp- 붙임
-            repo_name="temp-$(echo $repo_url | sed 's|https://||;s|/.*||;s|:|--|g')"
-            if ! helm repo add "$repo_name" "$repo_url"; then
-              echo "Failed to add repository: $repo_url"
-              continue
+            repo_type=$(echo "$repo_type" | xargs)
+            if [[ -z "$repo_type" ]]; then
+              repo_type="helm"
             fi
 
-            helm repo update "$repo_name"
+            echo "Processing: $chart_name version $chart_version from $repo_url (type: $repo_type)"
 
-            # 중복 파일 방지를 위해 기존에 동일한 이름의 .tgz 파일이 있는지 확인
-            expected_tgz=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${chart_version}*.tgz" | head -n1)
+            if [[ "$repo_type" == "oci" ]]; then
+              # OCI 레지스트리 처리
+              oci_url="oci://${repo_url}/${chart_name}"
 
-            # 차트가 이미 존재하지 않는 경우에만 다운로드
-            if [ ! -f "$expected_tgz" ]; then
-              echo "Downloading $chart_name version $chart_version..."
-              if helm pull "$repo_name/$chart_name" --version "$chart_version" --destination docs; then
-                echo "Successfully downloaded $chart_name-$chart_version"
-
-                # chart_version의 첫 글자가 숫자가 아니면 해당 문자만 제외 (예: v1.2.3 → 1.2.3)
+              echo "Attempting to pull from: $oci_url (version: $chart_version)"
+              if helm pull "$oci_url" --version "$chart_version" --destination docs; then
+                echo "Successfully downloaded $chart_name-$chart_version (OCI)"
                 search_version="$chart_version"
                 if [[ ! $chart_version =~ ^[0-9] ]]; then
                   search_version="${chart_version:1}"
                 fi
                 downloaded_file=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${search_version}*.tgz" | head -n1)
-
-                # 다운로드한 파일을 charts/ 디렉토리에 압축 해제
-                rm -rf "charts/${chart_name}"
-                tar -xzf "$downloaded_file" -C charts
+                if [ -f "$downloaded_file" ]; then
+                  rm -rf "charts/${chart_name}"
+                  tar -xzf "$downloaded_file" -C charts
+                  echo "Extracted to charts/${chart_name}"
+                else
+                  echo "Warning: Downloaded file not found: ${chart_name}-*${search_version}*.tgz"
+                fi
               else
-                echo "Failed to download $chart_name version $chart_version"
+                echo "Failed to download $chart_name version $chart_version from $oci_url"
               fi
             else
-              echo "Chart $chart_name-$chart_version already exists, skipping download"
+              # 일반 Helm repo 처리
+              repo_name="temp-$(echo $repo_url | sed 's|https://||;s|,.*||;s|[/: ]|-|g')"
+              if helm repo list | awk '{print $1}' | grep -q "^$repo_name$"; then
+                echo "Repository $repo_name already exists, skipping repo add."
+              else
+                if ! helm repo add "$repo_name" "$repo_url"; then
+                  echo "Failed to add repository: $repo_url"
+                  continue
+                fi
+              fi
+              helm repo update "$repo_name"
+              expected_tgz=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${chart_version}*.tgz" | head -n1)
+              if [ ! -f "$expected_tgz" ]; then
+                echo "Downloading $chart_name version $chart_version..."
+                if helm pull "$repo_name/$chart_name" --version "$chart_version" --destination docs; then
+                  echo "Successfully downloaded $chart_name-$chart_version"
+                  search_version="$chart_version"
+                  if [[ ! $chart_version =~ ^[0-9] ]]; then
+                    search_version="${chart_version:1}"
+                  fi
+                  downloaded_file=$(find docs -maxdepth 1 -type f -name "${chart_name}-*${search_version}*.tgz" | head -n1)
+                  rm -rf "charts/${chart_name}"
+                  tar -xzf "$downloaded_file" -C charts
+                else
+                  echo "Failed to download $chart_name version $chart_version"
+                fi
+              else
+                echo "Chart $chart_name-$chart_version already exists, skipping download"
+              fi
             fi
 
           done < ghe-helm-charts/asserts/helm-charts.txt
