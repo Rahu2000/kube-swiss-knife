@@ -7,6 +7,7 @@ echo "Starting disk cleanup script..."
 NERDCTL_PATH=$(command -v nerdctl 2>/dev/null)
 CTR_PATH=$(command -v ctr 2>/dev/null)
 NAMESPACE=${1:-k8s.io}
+REGISTRY=${2:-"registry.k8s.io"}
 
 if [ -n "$NERDCTL_PATH" ] && [ -x "$NERDCTL_PATH" ]; then
   echo "nerdctl found. Running nerdctl system prune..."
@@ -17,10 +18,15 @@ if [ -n "$NERDCTL_PATH" ] && [ -x "$NERDCTL_PATH" ]; then
   if [ -z "$LOCALHOST_PAUSE_IMAGE" ]; then
     PAUSE_IMAGE=$(nerdctl images --namespace=$NAMESPACE | grep pause | head -1 | awk '{print $3}')
     if [ -z "$PAUSE_IMAGE" ]; then
-      nerdctl pull --namespace=$NAMESPACE "registry.k8s.io/pause:latest"
-      nerdctl tag --namespace=$NAMESPACE "registry.k8s.io/pause:latest" "localhost/kubernetes/pause:latest"
+      if nerdctl pull --namespace=$NAMESPACE "$REGISTRY/pause:latest"; then
+        nerdctl tag --namespace=$NAMESPACE "$REGISTRY/pause:latest" "localhost/kubernetes/pause:latest" || \
+          echo "Warning: Failed to tag pause image"
+      else
+        echo "Warning: Failed to pull pause image from $REGISTRY"
+      fi
     else
-      nerdctl tag --namespace=$NAMESPACE "$PAUSE_IMAGE" "localhost/kubernetes/pause:latest"
+      nerdctl tag --namespace=$NAMESPACE "$PAUSE_IMAGE" "localhost/kubernetes/pause:latest" || \
+        echo "Warning: Failed to tag pause image"
     fi
     echo "Tagging pause image: localhost/kubernetes/pause"
   fi
@@ -35,8 +41,12 @@ elif [ -n "$CTR_PATH" ] && [ -x "$CTR_PATH" ]; then
 
   # pause 이미지가 없으면 다운로드 및 태깅
   if ! ctr --namespace $NAMESPACE images list | grep -q pause; then
-    ctr images pull registry.k8s.io/pause:latest
-    ctr images tag registry.k8s.io/pause:latest localhost/kubernetes/pause:latest
+    if ctr --namespace $NAMESPACE images pull $REGISTRY/pause:latest; then
+      ctr --namespace $NAMESPACE images tag $REGISTRY/pause:latest localhost/kubernetes/pause:latest || \
+        echo "Warning: Failed to tag pause image"
+    else
+      echo "Warning: Failed to pull pause image from $REGISTRY"
+    fi
   fi
 else
   echo 'Neither nerdctl nor ctr is installed.'
