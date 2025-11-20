@@ -8,24 +8,18 @@ ARG REGISTRY
 ENV NAMESPACE=${NAMESPACE:-k8s.io}
 ENV REGISTRY=${REGISTRY:-registry.k8s.io}
 
-# Switch to the sweeper user
-USER sweeper
-
 WORKDIR /home/sweeper
 
-# Install dependencies, create user, copy script, and set permissions in a single layer
+# Install dependencies and create user as root
 RUN set -ex && \
-    # Switch to root to install packages
-    USER root && \
-    # Add procps for `ps` command and create user
     apk add --no-cache procps && \
-    adduser -D -h /home/sweeper sweeper && \
-    # Switch back to sweeper user for the rest of the build
-    USER sweeper && \
-    # Copy script with correct ownership
-    COPY --chown=sweeper:sweeper sweeper.sh . && \
-    # Make script executable
-    chmod +x sweeper.sh
+    adduser -D -h /home/sweeper sweeper
+
+# Copy script and set permissions
+COPY --chown=sweeper:sweeper --chmod=755 sweeper.sh .
+
+# Switch to the non-root user
+USER sweeper
 
 # Set the entrypoint and default command
 ENTRYPOINT ["./sweeper.sh"]
