@@ -86,13 +86,30 @@ jobs:
       - name: Log SEMVER_VERSION
         run: echo "SEMVER_VERSION=${{ env.SEMVER_VERSION }}"
 
+       # Dependabot이 아닐 때만 Docker Hub 로그인
       - name: Log in to Docker Hub
+        if: github.actor != 'dependabot[bot]'
         uses: docker/login-action@v2
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      # 빌드는 항상 실행 (Dependabot PR에서도 빌드 테스트)
+      - name: Build Docker image
+        if: github.actor == 'dependabot[bot]'
+        run: |
+          docker buildx create --use --name multiarch-builder --driver docker-container
+          docker buildx inspect --bootstrap
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -f disk-sweeper/Dockerfile \
+            -t ${{ vars.DOCKER_USERNAME }}/disk-sweeper:${SEMVER_VERSION} \
+            -t ${{ vars.DOCKER_USERNAME }}/disk-sweeper:latest \
+            disk-sweeper
+          docker buildx rm multiarch-builder
+
+      # Push는 Dependabot이 아닐 때만 실행
       - name: Build and push Docker image
+        if: github.actor != 'dependabot[bot]'
         run: |
           docker buildx create --use --name multiarch-builder --driver docker-container
           docker buildx inspect --bootstrap
@@ -104,4 +121,5 @@ jobs:
           docker buildx rm multiarch-builder
 
       - name: Log out from Docker Hub
+        if: github.actor != 'dependabot[bot]'
         run: docker logout

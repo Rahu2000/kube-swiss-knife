@@ -154,17 +154,28 @@ jobs:
         run: echo "SEMVER_VERSION=${{ env.SEMVER_VERSION }}"
 
       - name: Log in to Docker Hub
-        if: env.IMAGE_HUB == 'docker'
+        if: env.IMAGE_HUB == 'docker' && github.actor != 'dependabot[bot]'
         uses: docker/login-action@v2
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Log in to Amazon ECR
-        if: env.IMAGE_HUB == 'ecr'
+        if: env.IMAGE_HUB == 'ecr' && github.actor != 'dependabot[bot]'
         uses: aws-actions/amazon-ecr-login@v1
 
       - name: Build and push Docker image
+        if: github.actor == 'dependabot[bot]'
+        run: |
+          docker buildx create --use --name maintainer_builder
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -f kube-maintainer/Dockerfile \
+            -t ${{ vars.DOCKER_USERNAME }}/kube-maintainer:${SEMVER_VERSION} \
+            -t ${{ vars.DOCKER_USERNAME }}/kube-maintainer:latest \
+            kube-maintainer
+          docker buildx rm maintainer_builder
+      - name: Build and push Docker image
+        if: github.actor != 'dependabot[bot]'
         run: |
           docker buildx create --use --name maintainer_builder
           if [ "${IMAGE_HUB}" == "docker" ]; then
@@ -186,5 +197,5 @@ jobs:
           docker buildx rm maintainer_builder
 
       - name: Log out from Docker Hub
-        if: env.IMAGE_HUB == 'docker'
+        if: env.IMAGE_HUB == 'docker' && github.actor != 'dependabot[bot]'
         run: docker logout
