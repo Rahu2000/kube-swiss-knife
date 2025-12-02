@@ -14,6 +14,7 @@ env:
   GIT_EVENT: ${{ github.event_name }}
   REPOSITORY: "kube-maintainer"
   SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+  SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
   EXIT_FAILURE_CODE: ${{ vars.EXIT_FAILURE_CODE || '1' }}
   MAX_CRITICAL_VULNERABILITIES: ${{ vars.MAX_CRITICAL_VULNERABILITIES || '0' }}
   MAX_HIGH_VULNERABILITIES: ${{ vars.MAX_HIGH_VULNERABILITIES || '5' }}
@@ -101,6 +102,7 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=${{ env.REPOSITORY }}
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
             -Dsonar.sources=${{ env.REPOSITORY }}
             -Dsonar.language=py
             -Dsonar.python.version=3.13
