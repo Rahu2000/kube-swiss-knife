@@ -27,10 +27,10 @@ jobs:
           # pull_request_target은 기본적으로 base 브랜치를 checkout하므로, PR의 head를 명시적으로 checkout해야 함
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Install Trivy
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          install-type: 'binary'
+      - name: Install latest Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
 
       - name: Set up Python
         uses: actions/setup-python@v2
