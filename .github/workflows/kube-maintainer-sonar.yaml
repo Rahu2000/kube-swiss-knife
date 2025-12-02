@@ -439,6 +439,7 @@ jobs:
       - name: Cleanup Temporary Reports
         if: always()
         run: |
+          echo "Docker 이미지 정리 중..."
           docker rmi ${{ env.REPOSITORY }}:${{ github.sha }} 2>/dev/null || true
           echo "임시 보고서 정리 중..."
           rm -rf "$TEMP_REPORTS_DIR" 2>/dev/null || true
