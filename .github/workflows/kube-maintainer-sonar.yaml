@@ -56,13 +56,10 @@ jobs:
       - name: Build Docker image
         if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
-          docker buildx create --use --name maintainer_builder
-          docker buildx build --platform linux/amd64,linux/arm64 \
+          docker build \
             -f kube-maintainer/Dockerfile \
             -t ${{ env.REPOSITORY }}:${{ github.sha }} \
-            --load \
             kube-maintainer
-          docker buildx rm maintainer_builder
 
       # Trivy 스캔 실행
       # local image scan
