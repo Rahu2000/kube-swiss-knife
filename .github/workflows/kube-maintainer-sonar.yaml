@@ -60,6 +60,7 @@ jobs:
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f kube-maintainer/Dockerfile \
             -t ${{ env.REPOSITORY }}:${{ github.sha }} \
+            --load \
             kube-maintainer
           docker buildx rm maintainer_builder
 
@@ -73,6 +74,7 @@ jobs:
             --scanners=vuln \
             --pkg-types=os,library \
             --exit-code=0 \
+            --timeout 10m \
             --format=sarif \
             --output=trivy-report.sarif \
             --severity=CRITICAL,HIGH \
@@ -83,6 +85,7 @@ jobs:
             --scanners=vuln \
             --pkg-types=os,library \
             --exit-code=0 \
+            --timeout 10m \
             --format=json \
             --output=trivy-report.json \
             --severity=CRITICAL,HIGH \
