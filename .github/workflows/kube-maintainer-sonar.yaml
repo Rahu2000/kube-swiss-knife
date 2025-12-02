@@ -6,8 +6,8 @@ on:
       - main
       - release/**
       - "dependabot/**" # Dependabot 브랜치 추가
-    paths:
-      - "kube-maintainer/**"
+    # paths:
+    #   - "kube-maintainer/**"
   workflow_dispatch:
 
 env:
