@@ -1,6 +1,9 @@
 name: App Sonar with Trivy SonarQube Integration
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
