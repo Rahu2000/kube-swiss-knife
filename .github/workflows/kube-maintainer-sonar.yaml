@@ -4,13 +4,15 @@ on:
   push:
     branches:
       - main
-  pull_request:
+    paths:
+      - "kube-maintainer/**"
+  pull_request_target:
     branches:
       - main
       - release/**
       - "dependabot/**" # Dependabot 브랜치 추가
-    # paths:
-    #   - "kube-maintainer/**"
+    paths:
+      - "kube-maintainer/**"
   workflow_dispatch:
 
 permissions:
