@@ -451,3 +451,4 @@ jobs:
           echo "임시 보고서 정리 중..."
           rm -rf "$TEMP_REPORTS_DIR" 2>/dev/null || true
           rm -f sonar-quality-gate.json 2>/dev/null || true
+          rm -f .scannerwork/report-task.txt 2>/dev/null || true
