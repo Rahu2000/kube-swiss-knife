@@ -125,7 +125,7 @@ jobs:
           # 이전 스텝의 output에서 ceTaskId와 projectKey를 가져옴
           REPORT_TASK_FILE=".scannerwork/report-task.txt"
           ceTaskId=$(grep 'ceTaskId=' "$REPORT_TASK_FILE" | cut -d'=' -f2)
-          componentKey={{ env.REPOSITORY }}
+          componentKey=${{ env.REPOSITORY }}
           echo "SonarQube ceTaskId: $ceTaskId"
           echo "SonarQube componentKey: $componentKey"
           TIMEOUT=300
