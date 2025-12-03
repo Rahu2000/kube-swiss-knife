@@ -13,6 +13,11 @@ on:
     #   - "kube-maintainer/**"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 env:
   GIT_EVENT: ${{ github.event_name }}
   REPOSITORY: "kube-maintainer"
