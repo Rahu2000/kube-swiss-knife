@@ -1,0 +1,461 @@
+name: App Sonar with Trivy SonarQube Integration
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "kube-maintainer/**"
+  pull_request_target:
+    branches:
+      - main
+      - release/**
+      - "dependabot/**" # Dependabot 브랜치 추가
+    paths:
+      - "kube-maintainer/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  GIT_EVENT: ${{ github.event_name }}
+  REPOSITORY: "kube-maintainer"
+  SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+  SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+  EXIT_FAILURE_CODE: ${{ vars.EXIT_FAILURE_CODE || '1' }}
+  MAX_CRITICAL_VULNERABILITIES: ${{ vars.MAX_CRITICAL_VULNERABILITIES || '0' }}
+  MAX_HIGH_VULNERABILITIES: ${{ vars.MAX_HIGH_VULNERABILITIES || '5' }}
+jobs:
+  build:
+    runs-on: [ubuntu-latest]
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          # pull_request_target은 기본적으로 base 브랜치를 checkout하므로, PR의 head를 명시적으로 checkout해야 함
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install latest Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          cd kube-maintainer
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+          pip install coverage
+
+      - name: Run tests and measure coverage
+        run: |
+          cd kube-maintainer
+          source venv/bin/activate
+          coverage run -m unittest discover -s tests
+          coverage report
+          coverage xml
+
+      - name: Build Docker image
+        if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          docker build \
+            -f kube-maintainer/Dockerfile \
+            -t ${{ env.REPOSITORY }}:${{ github.sha }} \
+            kube-maintainer
+
+      # Trivy 스캔 실행
+      # local image scan
+      - name: Run Trivy vulnerability scanner
+        if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          # For Intergrate to Sonarqube
+          trivy image ${{ env.REPOSITORY }}:${{ github.sha }} \
+            --scanners=vuln \
+            --pkg-types=os,library \
+            --exit-code=0 \
+            --timeout 10m \
+            --format=sarif \
+            --output=trivy-report.sarif \
+            --severity=CRITICAL,HIGH \
+            --ignore-unfixed
+
+          # For PR Comment
+          trivy image ${{ env.REPOSITORY }}:${{ github.sha }} \
+            --scanners=vuln \
+            --pkg-types=os,library \
+            --exit-code=0 \
+            --timeout 10m \
+            --format=json \
+            --output=trivy-report.json \
+            --severity=CRITICAL,HIGH \
+            --ignore-unfixed
+          # 생성한 trivy-report.*를 /tmp 임시 폴더를 생성하고 이동
+          TEMP_REPORTS_DIR=$(mktemp -d /tmp/trivy-reports-XXXX)
+          mv trivy-report.* "$TEMP_REPORTS_DIR"
+          echo "TEMP_REPORTS_DIR=$TEMP_REPORTS_DIR" >> $GITHUB_ENV
+
+      - name: Analyze SonarQube with Trivy Report
+        if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository
+        id: sonarqube-scan # 다음 스텝에서 output을 참조하기 위해 id 추가
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ env.REPOSITORY }}
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+            -Dsonar.sources=${{ env.REPOSITORY }}
+            -Dsonar.language=py
+            -Dsonar.python.version=3.13
+            -Dsonar.sarifReportPaths=${{ env.TEMP_REPORTS_DIR }}/trivy-report.sarif
+            -Dsonar.python.coverage.reportPaths=kube-maintainer/coverage.xml
+
+      # SonarQube Quality Gate 대기 및 결과 파싱
+      - name: Wait SonarQube Quality Gate and parsing results
+        if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository
+        id: parse-sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+        run: |
+          set -e
+          # 이전 스텝의 output에서 ceTaskId와 projectKey를 가져옴
+          REPORT_TASK_FILE=".scannerwork/report-task.txt"
+          ceTaskId=$(grep 'ceTaskId=' "$REPORT_TASK_FILE" | cut -d'=' -f2)
+          componentKey=${{ env.REPOSITORY }}
+          echo "SonarQube ceTaskId: $ceTaskId"
+          echo "SonarQube componentKey: $componentKey"
+          TIMEOUT=300
+          INTERVAL=10
+          ELAPSED=0
+          STATUS="NONE"
+
+          # ceTaskId 상태 polling
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            TASK_STATUS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/ce/task?id=$ceTaskId" | jq -r '.task.status')
+            echo "SonarQube Task 상태: $TASK_STATUS ($ELAPSED/$TIMEOUT 초)"
+            if [ "$TASK_STATUS" = "SUCCESS" ]; then
+              break
+            elif [ "$TASK_STATUS" = "FAILED" ]; then
+              echo "SonarQube 분석 실패"
+              break
+            fi
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "⏰ SonarQube Task 확인 시간 초과"
+            exit ${{ env.EXIT_FAILURE_CODE }}
+          fi
+
+          # Quality Gate 결과 확인
+          QUALITY_GATE=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$componentKey&pullRequest=${{ github.event.pull_request.number }}&organization=${{ env.SONAR_ORGANIZATION }}")
+          STATUS=$(echo "$QUALITY_GATE" | jq -r '.projectStatus.status // "ERROR"')
+
+          # 주요 메트릭(등급, 커버리지, 중복률, 라인 수 등) 조회
+          METRICS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/measures/component?component=$componentKey&pullRequest=${{ github.event.pull_request.number }}&metricKeys=security_rating,reliability_rating,sqale_rating,coverage,duplicated_lines_density,ncloc&organization=${{ env.SONAR_ORGANIZATION }}")
+
+          # 이슈 개수 조회
+          ISSUES=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/issues/search?componentKeys=$componentKey&pullRequest=${{ github.event.pull_request.number }}&resolved=false&organization=${{ env.SONAR_ORGANIZATION }}" | jq '.total')
+
+          echo "최종 Quality Gate 상태: $STATUS"
+          echo "주요 메트릭: $METRICS"
+          echo "해결되지 않은 이슈 개수: $ISSUES"
+          echo "$QUALITY_GATE" > sonar-quality-gate.json
+          echo "sonar_status=$STATUS" >> $GITHUB_OUTPUT
+          echo "sonar_metrics=$METRICS" >> $GITHUB_OUTPUT
+          echo "sonar_issues=$ISSUES" >> $GITHUB_OUTPUT
+
+      # PR 코멘트 생성 부분만 수정된 버전
+      - name: Create PR Comment
+        if: github.event.pull_request && (github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/github-script@v7
+        env:
+          REPOSITORY: ${{ env.REPOSITORY }}
+          TEMP_REPORTS_DIR: ${{ env.TEMP_REPORTS_DIR }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+          SONAR_METRICS: ${{ steps.parse-sonar.outputs.sonar_metrics }}
+          SONAR_ISSUES: ${{ steps.parse-sonar.outputs.sonar_issues }}
+          SONAR_STATUS: ${{ steps.parse-sonar.outputs.sonar_status }}
+        with:
+          script: |
+            const fs = require("fs");
+
+            try {
+              // Trivy 결과 파싱 (PR 코멘트용)
+              let trivyResults = "";
+              try {
+                const trivyReportPath = `${process.env.TEMP_REPORTS_DIR}/trivy-report.json`;
+
+                if (fs.existsSync(trivyReportPath)) {
+                  const trivyData = JSON.parse(fs.readFileSync(trivyReportPath, "utf8"));
+                  const vulnerabilities = trivyData.Results || [];
+
+                  if (vulnerabilities.length > 0) {
+                    trivyResults += "## 🚨 Trivy 보안 스캔 결과\n\n";
+                    let criticalCount = 0,
+                      highCount = 0,
+                      mediumCount = 0;
+
+                    vulnerabilities.forEach((result) => {
+                      if (result.Vulnerabilities) {
+                        trivyResults += `### 🔍 ${result.Target}\n`;
+                        result.Vulnerabilities.forEach((vuln) => {
+                          switch (vuln.Severity) {
+                            case "CRITICAL":
+                              criticalCount++;
+                              break;
+                            case "HIGH":
+                              highCount++;
+                              break;
+                            case "MEDIUM":
+                              mediumCount++;
+                              break;
+                          }
+                          trivyResults += `- **${vuln.Severity}**: \`${vuln.VulnerabilityID}\` - ${vuln.Title}\n`;
+                        });
+                        trivyResults += "\n";
+                      }
+                    });
+
+                    trivyResults += `**요약:** 🔴 Critical: ${criticalCount} | 🟠 High: ${highCount} | 🟡 Medium: ${mediumCount}\n\n`;
+                    trivyResults += `📊 **SonarQube 통합**: 취약점 정보가 SonarQube에 자동으로 업로드되었습니다.\n\n`;
+                  } else {
+                    trivyResults +=
+                      "## ✅ Trivy 보안 스캔 결과\n취약점이 발견되지 않았습니다.\n\n";
+                  }
+                } else {
+                  trivyResults +=
+                    "## ⚠️ Trivy 보안 스캔\nTrivy 스캔 결과를 찾을 수 없습니다.\n\n";
+                }
+              } catch (trivyError) {
+                console.error("Trivy 결과 파싱 오류:", trivyError);
+                trivyResults +=
+                  "## ⚠️ Trivy 보안 스캔\n결과 파싱 중 오류가 발생했습니다.\n\n";
+              }
+
+              // SonarQube 결과 파싱
+              let sonarResults = "";
+              try {
+                // Quality Gate 상태
+                const status = process.env.SONAR_STATUS || "UNKNOWN";
+                const statusIcon =
+                  status === "OK" ? "✅" : status === "ERROR" ? "❌" : "⚠️";
+
+                sonarResults += "## 📊 SonarQube 품질 분석 결과\n\n";
+                sonarResults += `**Quality Gate:** ${statusIcon} ${status}\n\n`;
+
+                // 메트릭 parsing
+                if (process.env.SONAR_METRICS) {
+                  const metrics = JSON.parse(process.env.SONAR_METRICS);
+                  const metricMap = {};
+                  if (metrics.component && metrics.component.measures) {
+                    metrics.component.measures.forEach((measure) => {
+                      metricMap[measure.metric] = measure.value;
+                    });
+
+                    sonarResults += "### 📊 SonarQube 주요 메트릭\n\n";
+                    sonarResults += `- **신뢰성:** ${metricMap["reliability_rating"] || "N/A"}\n`;
+                    sonarResults += `- **보안:** ${metricMap["security_rating"] || "N/A"}\n`;
+                    sonarResults += `- **유지보수성:** ${metricMap["sqale_rating"] || "N/A"}\n`;
+                    sonarResults += `- **커버리지:** ${metricMap["coverage"] || "0.0"}%\n`;
+                    sonarResults += `- **중복률:** ${metricMap["duplicated_lines_density"] || "0.0"}%\n`;
+                    sonarResults += `- **라인 수:** ${metricMap["ncloc"] || "0"}\n`;
+                  }
+                }
+
+                // 해결되지 않은 이슈 개수
+                if (process.env.SONAR_ISSUES) {
+                  const issuesCount = process.env.SONAR_ISSUES;
+                  sonarResults += `- **해결되지 않은 이슈 개수:** ${issuesCount}\n\n`;
+                }
+
+              } catch (sonarError) {
+                console.error("SonarQube 결과 파싱 오류:", sonarError);
+                sonarResults +=
+                  "## ⚠️ SonarQube 분석 결과\n결과 파싱 중 오류가 발생했습니다.\n\n";
+              }
+
+              // SonarQube 링크 추가
+              const projectKey = process.env.REPOSITORY;
+              const sonarHostUrl = process.env.SONAR_HOST_URL;
+              const sonarQubeResults = `## 📊 SonarQube 통합 결과\n\n✅ **Trivy 취약점 정보가 SonarQube에 업로드되었습니다**\n\n[🔗 SonarQube에서 전체 결과 보기](${sonarHostUrl}/dashboard?id=${projectKey})\n\n`;
+
+              // 지표 설명 추가
+              const metricDescription = `
+              ---
+              ## 📖 SonarQube 주요 지표 설명
+
+              - **신뢰성**: 버그(잠재적 오류) 수준을 등급(A ~ E, 1.0 ~ 5.0)으로 표시합니다. 1.0(A)이 가장 우수합니다.
+              - **보안**: 보안 취약점 수준을 등급(A ~ E, 1.0 ~ 5.0)으로 표시합니다.
+              - **유지보수성**: 코드 스멜(비효율적/비표준 코드) 수준을 등급(A ~ E, 1.0 ~ 5.0)으로 표시합니다.
+              - **커버리지**: 전체 코드 중 테스트로 검증된 코드 비율(%). 70% 이상이 권장됩니다.
+              - **중복률**: 전체 코드 중 중복된 라인의 비율(%). 3% 이하가 권장됩니다.
+              - **라인 수**: 분석된 전체 코드 라인 수입니다.
+              - **해결되지 않은 이슈 개수**: 현재까지 해결되지 않은 버그, 취약점, 코드 스멜의 총 개수입니다.
+              `;
+
+              // 전체 코멘트 구성
+              const commentBody = `# 🔍 코드 품질 & 보안 분석 리포트
+
+              ${trivyResults}
+              ${sonarResults}
+              ${sonarQubeResults}
+              ${metricDescription}
+
+              ---
+
+              **분석 정보:**
+              - 📄 실행 시간: ${new Date().toLocaleString("ko-KR")}
+              - 🔍 커밋: \`${context.sha.substring(0, 7)}\`
+              - 🌳 브랜치: \`${context.ref.replace("refs/heads/", "")}\`
+
+              > 이 리포트는 자동으로 생성되었습니다. 🤖
+              `;
+
+              // 기존 봇 코멘트 찾기 및 생성/업데이트
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const existingComment = comments.find(
+                (comment) =>
+                  (comment.user.type === "Bot" ||
+                    comment.user.login === "github-actions[bot]") &&
+                  comment.body &&
+                  comment.body.includes("🔍 코드 품질 & 보안 분석 리포트")
+              );
+
+              if (existingComment && existingComment.id) {
+                console.log(`기존 코멘트 업데이트: ${existingComment.id}`);
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingComment.id,
+                  body: commentBody,
+                });
+              } else {
+                console.log("새 코멘트 생성");
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: commentBody,
+                });
+              }
+
+            } catch (mainError) {
+              console.error("PR 코멘트 생성 중 전체 오류:", mainError);
+
+              // 에러 발생 시 기본 코멘트 생성
+              const errorCommentBody = `# ⚠️ 코드 품질 & 보안 분석 오류
+
+              분석 중 오류가 발생했습니다. 관리자에게 문의하세요.
+
+              **오류 정보:**
+              - 📄 실행 시간: ${new Date().toLocaleString("ko-KR")}
+              - 🔍 커밋: \`${context.sha.substring(0, 7)}\`
+              - 🌳 브랜치: \`${context.ref.replace("refs/heads/", "")}\`
+
+              > 이 리포트는 자동으로 생성되었습니다. 🤖`;
+
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: errorCommentBody,
+                });
+              } catch (commentError) {
+                console.error("에러 코멘트 생성 실패:", commentError);
+              }
+
+              throw mainError;
+            }
+
+      # Quality Gate 검증 및 Trivy 취약점 검증
+      - name: Check SonarQube Quality Gate and Trivy Vulnerabilities
+        if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          STATUS="${{ steps.parse-sonar.outputs.sonar_status }}"
+          echo "SonarQube 스캔 결과 검증 시작..."
+          # SonarQube Quality Gate 상태 확인
+          if [ "$STATUS" = "OK" ]; then
+            echo "✅ SonarQube Quality Gate 통과"
+          elif [ "$STATUS" = "ERROR" ]; then
+            echo "❌ SonarQube Quality Gate 실패"
+            exit ${{ env.EXIT_FAILURE_CODE }}
+          elif [ "$STATUS" = "NONE" ]; then
+            echo "⚠️ Quality Gate가 설정되지 않음"
+            exit ${{ env.EXIT_FAILURE_CODE }}
+          fi
+          echo "Trivy 취약점 검증 시작..."
+          # 환경변수에서 임시 디렉토리 경로 가져오기
+          TRIVY_REPORT_PATH="$TEMP_REPORTS_DIR/trivy-report.json"
+          echo "Trivy 리포트 경로: $TRIVY_REPORT_PATH"
+          if [ ! -f "$TRIVY_REPORT_PATH" ]; then
+            echo "❌ Trivy 보고서를 찾을 수 없습니다: $TRIVY_REPORT_PATH"
+            echo "취약점 검출로 인한 merge fail"
+            exit ${{ env.EXIT_FAILURE_CODE }}
+          fi
+          # JSON 파일 존재 및 유효성 확인
+          if ! jq empty "$TRIVY_REPORT_PATH" 2>/dev/null; then
+            echo "❌ Trivy 보고서 형식이 올바르지 않습니다"
+            echo "취약점 검출로 인한 merge fail"
+            exit ${{ env.EXIT_FAILURE_CODE }}
+          fi
+          # CRITICAL, HIGH 취약점 개수 계산
+          CRITICAL_COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$TRIVY_REPORT_PATH")
+          HIGH_COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$TRIVY_REPORT_PATH")
+          echo "발견된 취약점:"
+          echo "🔴 CRITICAL: $CRITICAL_COUNT"
+          echo "🟠 HIGH: $HIGH_COUNT"
+          # 취약점 임계값 설정 (환경변수로 설정 가능하도록)
+          MAX_CRITICAL=${{ env.MAX_CRITICAL_VULNERABILITIES }}
+          MAX_HIGH=${{ env.MAX_HIGH_VULNERABILITIES }}
+          echo "허용 임계값:"
+          echo "🔴 CRITICAL 최대: $MAX_CRITICAL"
+          echo "🟠 HIGH 최대: $MAX_HIGH"
+          # 취약점 체크
+          FAIL_REASON=""
+          if [ "$CRITICAL_COUNT" -gt "$MAX_CRITICAL" ]; then
+            FAIL_REASON="${FAIL_REASON}CRITICAL 취약점 $CRITICAL_COUNT 개 발견 (허용: $MAX_CRITICAL 개).\n"
+          fi
+          if [ "$HIGH_COUNT" -gt "$MAX_HIGH" ]; then
+            FAIL_REASON="${FAIL_REASON}HIGH 취약점 $HIGH_COUNT 개 발견 (허용: $MAX_HIGH 개).\n"
+          fi
+          # Quality Gate 실패 시 추가
+          if [ "$STATUS" = "ERROR" ]; then
+            FAIL_REASON="${FAIL_REASON}SonarQube Quality Gate: Failed.\n"
+          fi
+          if [ -n "$FAIL_REASON" ]; then
+            echo "❌ 취약점 임계값 초과"
+            echo -e "$FAIL_REASON"
+            echo "취약점 검출로 인한 merge fail"
+            exit ${{ env.EXIT_FAILURE_CODE }}
+          else
+            echo "✅ Trivy 취약점 검사 통과"
+          fi
+
+      - name: Cleanup Temporary Reports
+        if: always()
+        run: |
+          echo "Docker 이미지 정리 중..."
+          docker rmi ${{ env.REPOSITORY }}:${{ github.sha }} 2>/dev/null || true
+          echo "임시 보고서 정리 중..."
+          rm -rf "$TEMP_REPORTS_DIR" 2>/dev/null || true
+          rm -f sonar-quality-gate.json 2>/dev/null || true
+          rm -f .scannerwork/report-task.txt 2>/dev/null || true
