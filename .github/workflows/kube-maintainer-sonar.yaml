@@ -123,8 +123,9 @@ jobs:
         run: |
           set -e
           # 이전 스텝의 output에서 ceTaskId와 projectKey를 가져옴
-          ceTaskId="${{ steps.sonarqube-scan.outputs.sonar-ce-task-id }}"
-          componentKey="${{ env.REPOSITORY }}" # projectKey는 이미 환경 변수에 있음
+          REPORT_TASK_FILE=".scannerwork/report-task.txt"
+          ceTaskId=$(grep 'ceTaskId=' "$REPORT_TASK_FILE" | cut -d'=' -f2)
+          componentKey=$(grep 'projectKey=' "$REPORT_TASK_FILE" | cut -d'=' -f2)
           echo "SonarQube ceTaskId: $ceTaskId"
           echo "SonarQube componentKey: $componentKey"
           TIMEOUT=300
