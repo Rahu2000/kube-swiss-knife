@@ -98,7 +98,7 @@ jobs:
 
       - name: Analyze SonarQube with Trivy Report
         if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
@@ -118,6 +118,7 @@ jobs:
         id: parse-sonar
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
         run: |
           set -e
           # ceTaskId와 projectKey 추출
@@ -133,7 +134,7 @@ jobs:
 
           # ceTaskId 상태 polling
           while [ $ELAPSED -lt $TIMEOUT ]; do
-            TASK_STATUS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/ce/task?id=$ceTaskId" | jq -r '.task.status')
+            TASK_STATUS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/ce/task?id=$ceTaskId&organization=${{ env.SONAR_ORGANIZATION }}" | jq -r '.task.status')
             echo "SonarQube Task 상태: $TASK_STATUS ($ELAPSED/$TIMEOUT 초)"
             if [ "$TASK_STATUS" = "SUCCESS" ]; then
               break
@@ -151,14 +152,14 @@ jobs:
           fi
 
           # Quality Gate 결과 확인
-          QUALITY_GATE=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$componentKey")
+          QUALITY_GATE=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$componentKey&organization=${{ env.SONAR_ORGANIZATION }}")
           STATUS=$(echo "$QUALITY_GATE" | jq -r '.projectStatus.status // "ERROR"')
 
           # 주요 메트릭(등급, 커버리지, 중복률, 라인 수 등) 조회
-          METRICS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/measures/component?component=$componentKey&metricKeys=security_rating,reliability_rating,sqale_rating,coverage,duplicated_lines_density,ncloc")
+          METRICS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/measures/component?component=$componentKey&metricKeys=security_rating,reliability_rating,sqale_rating,coverage,duplicated_lines_density,ncloc&organization=${{ env.SONAR_ORGANIZATION }}")
 
           # 이슈 개수 조회
-          ISSUES=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/issues/search?componentKeys=$componentKey&resolved=false" | jq '.total')
+          ISSUES=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/issues/search?componentKeys=$componentKey&resolved=false&organization=${{ env.SONAR_ORGANIZATION }}" | jq '.total')
 
           echo "최종 Quality Gate 상태: $STATUS"
           echo "주요 메트릭: $METRICS"
