@@ -6,11 +6,7 @@ on:
       - main
     paths:
       - "kube-maintainer/**"
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "kube-maintainer/**"
+  workflow_dispatch:
 
 permissions:
   contents: write # to be able to publish a GitHub release
@@ -160,14 +156,24 @@ jobs:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      # 2.0. AWS Assume Role 설정
+      - name: Assume Role
+        if: env.IMAGE_HUB == 'ecr' && github.actor != 'dependabot[bot]'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ap-northeast-2
+          # role-to-assume: ${{ vars.ECR_ASSUME_ROLE }} # Cross Account 접근이 필요 할 경우
+          # role-skip-session-tagging: true             # Cross Account 접근이 필요 할 경우
+
       - name: Log in to Amazon ECR
         if: env.IMAGE_HUB == 'ecr' && github.actor != 'dependabot[bot]'
-        uses: aws-actions/amazon-ecr-login@v1
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push Docker image
         if: github.actor == 'dependabot[bot]'
         run: |
-          docker buildx create --use --name maintainer_builder
+          docker buildx create --use --name maintainer_builder || true
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f kube-maintainer/Dockerfile \
             -t ${{ vars.DOCKER_USERNAME }}/kube-maintainer:${SEMVER_VERSION} \
@@ -177,7 +183,7 @@ jobs:
       - name: Build and push Docker image
         if: github.actor != 'dependabot[bot]'
         run: |
-          docker buildx create --use --name maintainer_builder
+          docker buildx create --use --name maintainer_builder || true
           if [ "${IMAGE_HUB}" == "docker" ]; then
             docker buildx build --platform linux/amd64,linux/arm64 \
               -f kube-maintainer/Dockerfile \
@@ -198,4 +204,8 @@ jobs:
 
       - name: Log out from Docker Hub
         if: env.IMAGE_HUB == 'docker' && github.actor != 'dependabot[bot]'
-        run: docker logout
+        run: docker logout docker.io
+
+      - name: Log out from Amazon ECR
+        if: env.IMAGE_HUB == 'ecr' && github.actor != 'dependabot[bot]'
+        run: docker logout ${{ steps.login-ecr.outputs.registry }}

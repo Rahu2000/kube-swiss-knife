@@ -173,5 +173,7 @@ cython_debug/
 # macOS
 .DS_Store
 
-# Oribtron
+# Local IDE settings
+.vscode/*
 .orbitron*
+.sonarlint/*

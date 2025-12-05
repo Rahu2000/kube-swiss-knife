@@ -22,7 +22,14 @@ class TrafficMaintainerTestCase(unittest.TestCase):
     @patch('app.subprocess.run')
     def test_deploy(self, mock_subprocess_run, mock_glob, mock_getenv):
         print("Testing deploy endpoint")
-        mock_getenv.side_effect = lambda key, default=None: 'default' if key == 'NAMESPACE' else '3' if key == 'SLEEP_TIME' else default
+        def mock_getenv_side_effect(key, default=None):
+            if key == 'NAMESPACE':
+                return 'default'
+            elif key == 'SLEEP_TIME':
+                return '3'
+            else:
+                return default
+        mock_getenv.side_effect = mock_getenv_side_effect
         mock_glob.return_value = ['/config/envoyfilter/test.yaml']
         mock_subprocess_run.return_value = MagicMock(returncode=0)
 
@@ -39,7 +46,14 @@ class TrafficMaintainerTestCase(unittest.TestCase):
     @patch('app.subprocess.run')
     def test_deploy_with_errors(self, mock_subprocess_run, mock_glob, mock_getenv):
         print("Testing deploy endpoint with errors")
-        mock_getenv.side_effect = lambda key, default=None: 'default' if key == 'NAMESPACE' else '3' if key == 'SLEEP_TIME' else default
+        def mock_getenv_side_effect(key, default=None):
+            if key == 'NAMESPACE':
+                return 'default'
+            elif key == 'SLEEP_TIME':
+                return '3'
+            else:
+                return default
+        mock_getenv.side_effect = mock_getenv_side_effect
         mock_glob.return_value = ['/config/envoyfilter/test.yaml']
         mock_subprocess_run.return_value = MagicMock(returncode=1, stderr='Error')
 
@@ -88,7 +102,7 @@ class TrafficMaintainerTestCase(unittest.TestCase):
     def test_delete_yaml_files(self, mock_subprocess_run, mock_sleep):
         print("Testing delete_yaml_files function")
         mock_subprocess_run.return_value = MagicMock(returncode=0)
-        errors, deleted_files = delete_yaml_files('default', ['/config/envoyfilter/test.yaml'], 0)
+        errors, _ = delete_yaml_files('default', ['/config/envoyfilter/test.yaml'], 0)
         self.assertEqual(errors, [])
 
     @patch('app.time.sleep', return_value=None)
@@ -96,7 +110,7 @@ class TrafficMaintainerTestCase(unittest.TestCase):
     def test_delete_yaml_files_with_errors(self, mock_subprocess_run, mock_sleep):
         print("Testing delete_yaml_files function with errors")
         mock_subprocess_run.return_value = MagicMock(returncode=1, stderr='Error')
-        errors, deleted_files = delete_yaml_files('default', ['/config/envoyfilter/test.yaml'], 0)
+        errors, _ = delete_yaml_files('default', ['/config/envoyfilter/test.yaml'], 0)
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0]['error'], 'Error')
 
