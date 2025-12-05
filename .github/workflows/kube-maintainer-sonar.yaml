@@ -162,15 +162,23 @@ jobs:
             exit ${{ env.EXIT_FAILURE_CODE }}
           fi
 
-          # Quality Gate 결과 확인
-          QUALITY_GATE=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$componentKey&pullRequest=${{ github.event.pull_request.number }}&organization=${{ env.SONAR_ORGANIZATION }}")
+          # PR 이벤트일 경우에만 pullRequest 파라미터 추가
+          _PR_PARAM=""
+          ## Default 브랜치 분석이 없는 경우만 추가
+          # if [ "${{ github.event_name }}" == "pull_request_target" ]; then
+          #   _PR_PARAM="&pullRequest=${{ github.event.pull_request.number }}"
+          # fi
+
+          # Quality Gate 결과 확인 (PR/main 분기 처리)
+          QUALITY_GATE_URL="$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$componentKey&organization=${{ env.SONAR_ORGANIZATION }}${_PR_PARAM}"
+          QUALITY_GATE=$(curl -s -u "$SONAR_TOKEN:" "$QUALITY_GATE_URL")
           STATUS=$(echo "$QUALITY_GATE" | jq -r '.projectStatus.status // "ERROR"')
 
           # 주요 메트릭(등급, 커버리지, 중복률, 라인 수 등) 조회
-          METRICS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/measures/component?component=$componentKey&pullRequest=${{ github.event.pull_request.number }}&metricKeys=security_rating,reliability_rating,sqale_rating,coverage,duplicated_lines_density,ncloc&organization=${{ env.SONAR_ORGANIZATION }}")
+          METRICS=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/measures/component?component=$componentKey&metricKeys=security_rating,reliability_rating,sqale_rating,coverage,duplicated_lines_density,ncloc&organization=${{ env.SONAR_ORGANIZATION }}${_PR_PARAM}")
 
           # 이슈 개수 조회
-          ISSUES=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/issues/search?componentKeys=$componentKey&pullRequest=${{ github.event.pull_request.number }}&resolved=false&organization=${{ env.SONAR_ORGANIZATION }}" | jq '.total')
+          ISSUES=$(curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/issues/search?componentKeys=$componentKey&resolved=false&organization=${{ env.SONAR_ORGANIZATION }}${_PR_PARAM}" | jq '.total')
 
           echo "최종 Quality Gate 상태: $STATUS"
           echo "주요 메트릭: $METRICS"
