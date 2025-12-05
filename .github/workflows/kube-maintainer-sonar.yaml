@@ -119,6 +119,9 @@ jobs:
             -Dsonar.python.version=3.13
             -Dsonar.sarifReportPaths=${{ env.TEMP_REPORTS_DIR }}/trivy-report.sarif
             -Dsonar.python.coverage.reportPaths=kube-maintainer/coverage.xml
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
+            -Dsonar.pullrequest.branch=${{ github.event.pull_request.head.ref }}
+            -Dsonar.pullrequest.base=${{ github.event.pull_request.base.ref }}
 
       # SonarQube Quality Gate 대기 및 결과 파싱
       - name: Wait SonarQube Quality Gate and parsing results
