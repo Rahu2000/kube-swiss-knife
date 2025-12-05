@@ -6,11 +6,7 @@ on:
       - main
     paths:
       - "disk-sweeper/**"
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "disk-sweeper/**"
+  workflow_dispatch:
 
 permissions:
   contents: write # to be able to publish a GitHub release
@@ -122,4 +118,4 @@ jobs:
 
       - name: Log out from Docker Hub
         if: github.actor != 'dependabot[bot]'
-        run: docker logout
+        run: docker logout docker.io

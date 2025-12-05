@@ -28,11 +28,11 @@ COPY app.py .
 ARG TARGETPLATFORM
 RUN apt-get update && \
     apt-get install -y curl && \
-    KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt) && \
+    KUBECTL_VERSION=$(curl --proto "=https" -L -s https://dl.k8s.io/release/stable.txt) && \
     if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
-        curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
+    curl --proto "=https" -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
     elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-        curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/arm64/kubectl"; \
+    curl --proto "=https" -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/arm64/kubectl"; \
     fi && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     apt-get clean && \
