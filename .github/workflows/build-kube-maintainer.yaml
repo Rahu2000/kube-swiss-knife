@@ -34,7 +34,7 @@ jobs:
           source venv/bin/activate
           pip install -r requirements.txt
           pip install coverage
-          pip install coverage-badge
+          pip install genbadge
 
       - name: Run tests and measure coverage
         run: |
@@ -55,7 +55,7 @@ jobs:
           source venv/bin/activate
           coverage report --fail-under=80
           mkdir -p ../.github/badges/kube-maintainer
-          coverage-badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f || coverage-badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f
+          genbadge coverage -i coverage.xml -o ../.github/badges/kube-maintainer/coverage-badge.svg
 
       - name: Update README with coverage badge
         run: |
