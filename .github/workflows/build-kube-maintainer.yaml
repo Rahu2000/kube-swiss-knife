@@ -34,7 +34,7 @@ jobs:
           source venv/bin/activate
           pip install -r requirements.txt
           pip install coverage
-          pip install genbadge
+          pip install genbadge[coverage]
 
       - name: Run tests and measure coverage
         run: |
