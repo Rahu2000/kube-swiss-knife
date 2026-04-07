@@ -55,7 +55,7 @@ jobs:
           source venv/bin/activate
           coverage report --fail-under=80
           mkdir -p ../.github/badges/kube-maintainer
-          coverage_badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f || coverage-badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f
+          coverage-badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f || coverage-badge -o ../.github/badges/kube-maintainer/coverage-badge.svg -f
 
       - name: Update README with coverage badge
         run: |
